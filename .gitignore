@@ -11,3 +11,5 @@ __pycache__
 *.so
 *.d
 *.plan
+*.onnx
+*.pt

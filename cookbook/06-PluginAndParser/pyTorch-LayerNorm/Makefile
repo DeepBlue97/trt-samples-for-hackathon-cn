@@ -1,6 +1,6 @@
 CUDA_PATH   = /usr/local/cuda/
 NVCC        = $(CUDA_PATH)/bin/nvcc
-TRT_PATH    = /usr/lib/x86_64-linux-gnu/
+TRT_PATH    = /home/peter/Downloads/TensorRT-8.2.3.0
 SM          = 61
 CCFLAG      = -std=c++11 -DNDEBUG -O3 -arch=sm_$(SM)
 SOFLAG          = $(CCFLAG) -shared
