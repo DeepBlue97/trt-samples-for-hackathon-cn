@@ -8,3 +8,5 @@ old/python/*.pb
 .cache
 .vscode
 __pycache__
+cookbook/05-Plugin/usePluginV2DynamicExt/AddScalarPlugin.so
+cookbook/05-Plugin/usePluginV2DynamicExt/AddScalarPlugin.d
