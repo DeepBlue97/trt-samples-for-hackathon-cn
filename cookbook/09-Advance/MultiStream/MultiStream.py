@@ -175,8 +175,11 @@ def run2(engine):
         stream = stream1 if i & 1 else stream0
 
         cudart.cudaMemcpyAsync(inputD, inputH, inputSize, cudart.cudaMemcpyKind.cudaMemcpyHostToDevice, stream)
+        # Make a compute stream wait on an event.
         cudart.cudaStreamWaitEvent(stream, eventBefore, cudart.cudaEventWaitDefault)
         context.execute_async_v2([int(inputD), int(outputD)], stream)
+        # Records an event.
+        # Captures in event the contents of stream at the time of this call. event and stream must be on the same CUDA context.
         cudart.cudaEventRecord(eventAfter, stream)
         cudart.cudaMemcpyAsync(outputH, outputD, outputSize, cudart.cudaMemcpyKind.cudaMemcpyDeviceToHost, stream)
     '''# 奇偶循环拆开写
@@ -197,9 +200,88 @@ def run2(engine):
     trtTimeEnd = time()
     print("%6.3fms - 2 stream, DataCopy + Inference" % ((trtTimeEnd - trtTimeStart) / 30 * 1000))
 
+def run3(engine):
+    context = engine.create_execution_context()
+    context.set_binding_shape(0, [nIn, cIn, hIn, wIn])
+    _, stream0 = cudart.cudaStreamCreate()
+    _, stream1 = cudart.cudaStreamCreate()
+    _, stream2 = cudart.cudaStreamCreate()
+    _, event0 = cudart.cudaEventCreate()
+    _, event1 = cudart.cudaEventCreate()
+    _, event2 = cudart.cudaEventCreate()
+
+    data = np.random.rand(nIn * cIn * hIn * wIn).astype(np.float32).reshape(nIn, cIn, hIn, wIn)
+    inputSize = trt.volume(context.get_binding_shape(0)) * np.array([0], dtype=trt.nptype(engine.get_binding_dtype(0))).nbytes
+    outputSize = trt.volume(context.get_binding_shape(1)) * np.array([0], dtype=trt.nptype(engine.get_binding_dtype(1))).nbytes
+    _, inputH0 = cudart.cudaHostAlloc(inputSize, cudart.cudaHostAllocWriteCombined)
+    _, inputH1 = cudart.cudaHostAlloc(inputSize, cudart.cudaHostAllocWriteCombined)
+    _, inputH2 = cudart.cudaHostAlloc(inputSize, cudart.cudaHostAllocWriteCombined)
+    _, outputH0 = cudart.cudaHostAlloc(outputSize, cudart.cudaHostAllocWriteCombined)
+    _, outputH1 = cudart.cudaHostAlloc(outputSize, cudart.cudaHostAllocWriteCombined)
+    _, outputH2 = cudart.cudaHostAlloc(outputSize, cudart.cudaHostAllocWriteCombined)
+    _, inputD0 = cudart.cudaMallocAsync(inputSize, stream0)
+    _, inputD1 = cudart.cudaMallocAsync(inputSize, stream1)
+    _, inputD2 = cudart.cudaMallocAsync(inputSize, stream2)
+    _, outputD0 = cudart.cudaMallocAsync(outputSize, stream0)
+    _, outputD1 = cudart.cudaMallocAsync(outputSize, stream1)
+    _, outputD2 = cudart.cudaMallocAsync(outputSize, stream2)
+
+    # 总时间计时
+    for i in range(10):
+        context.execute_async_v2([int(inputD0), int(outputD0)], stream0)
+
+    trtTimeStart = time()
+    cudart.cudaEventRecord(event2, stream2)
+
+    for i in range(30):
+        if i % 3 == 0:
+            inputH, outputH = [inputH0, outputH0]
+            inputD, outputD = [inputD0, outputD0]
+            eventBefore, eventAfter = event2, event0
+            stream = stream0
+
+        elif i % 3 == 1:
+            inputH, outputH = [inputH1, outputH1]
+            inputD, outputD = [inputD1, outputD1]
+            eventBefore, eventAfter = event0, event1
+            stream = stream1
+
+        elif i % 3 == 1:
+            inputH, outputH = [inputH2, outputH2]
+            inputD, outputD = [inputD2, outputD2]
+            eventBefore, eventAfter = event1, event2
+            stream = stream2
+
+        cudart.cudaMemcpyAsync(inputD, inputH, inputSize, cudart.cudaMemcpyKind.cudaMemcpyHostToDevice, stream)
+        # Make a compute stream wait on an event.
+        cudart.cudaStreamWaitEvent(stream, eventBefore, cudart.cudaEventWaitDefault)
+        context.execute_async_v2([int(inputD), int(outputD)], stream)
+        # Records an event.
+        # Captures in event the contents of stream at the time of this call. event and stream must be on the same CUDA context.
+        cudart.cudaEventRecord(eventAfter, stream)
+        cudart.cudaMemcpyAsync(outputH, outputD, outputSize, cudart.cudaMemcpyKind.cudaMemcpyDeviceToHost, stream)
+    '''# 奇偶循环拆开写
+    for i in range(30//2):
+        cudart.cudaMemcpyAsync(inputD0, inputH0, inputSize, cudart.cudaMemcpyKind.cudaMemcpyHostToDevice, stream0)
+        cudart.cudaStreamWaitEvent(stream0,event1,cudart.cudaEventWaitDefault)
+        context.execute_async_v2([int(inputD0), int(outputD0)], stream0)
+        cudart.cudaEventRecord(event0,stream0)
+        cudart.cudaMemcpyAsync(outputH0, outputD0, outputSize, cudart.cudaMemcpyKind.cudaMemcpyDeviceToHost, stream0)
+
+        cudart.cudaMemcpyAsync(inputD1, inputH1, inputSize, cudart.cudaMemcpyKind.cudaMemcpyHostToDevice, stream1)
+        cudart.cudaStreamWaitEvent(stream1,event0,cudart.cudaEventWaitDefault)
+        context.execute_async_v2([int(inputD1), int(outputD1)], stream1)
+        cudart.cudaEventRecord(event1,stream1)
+        cudart.cudaMemcpyAsync(outputH1, outputD1, outputSize, cudart.cudaMemcpyKind.cudaMemcpyDeviceToHost, stream1)
+    '''
+    cudart.cudaEventSynchronize(event1)
+    trtTimeEnd = time()
+    print("%6.3fms - 3 stream, DataCopy + Inference" % ((trtTimeEnd - trtTimeStart) / 30 * 1000))
+
 if __name__ == '__main__':
     #os.system("rm -rf ./*.plan")
     cudart.cudaDeviceSynchronize()
     engine = getEngine()  # 创建 engine
     run1(engine)  # 单 stream 推理
     run2(engine)  # 双 stream 推理
+    run3(engine)  # 三 stream 推理
